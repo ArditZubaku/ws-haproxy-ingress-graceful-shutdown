@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import WebSocket from 'ws';
 
 // Parse command line arguments
@@ -15,6 +16,7 @@ function connectToApp(ws, url) {
 
 		const startTime = Date.now();
 		let messageCount = 0;
+		let waitingForSlowResponse = false;
 
 		ws.on('open', () => {
 			console.log(`Connected to ${url}`);
@@ -22,30 +24,48 @@ function connectToApp(ws, url) {
 			// Send an initial message - either slow or regular
 			if (useSlowEndpoint) {
 				console.log('Sending slow request via WebSocket...');
+				waitingForSlowResponse = true;
 				ws.send('SLOW_REQUEST');
 			} else {
 				ws.send('Hello from Node.js client!');
-			}
 
-			// Send periodic messages to keep the connection alive
-			const interval = setInterval(() => {
-				if (ws.readyState === WebSocket.OPEN) {
-					ws.send(`Ping from client at ${new Date().toISOString()}`);
-				} else {
+				// Send periodic messages to keep the connection alive (regular mode only)
+				const interval = setInterval(() => {
+					if (ws.readyState === WebSocket.OPEN) {
+						ws.send(`Ping from client at ${new Date().toISOString()}`);
+					} else {
+						clearInterval(interval);
+					}
+				}, 3000);
+
+				// Clean up interval when connection closes
+				ws.on('close', () => {
 					clearInterval(interval);
-				}
-			}, 3000); // Send a message every 3 seconds
-
-			// Clean up interval when connection closes
-			ws.on('close', () => {
-				clearInterval(interval);
-			});
+				});
+			}
 		});
 
 		ws.on('message', (data) => {
 			messageCount++;
 			const elapsed = (Date.now() - startTime) / 1000;
-			console.log(`[${url}][${elapsed.toFixed(1)}s] ${data.toString()}`);
+			const message = data.toString();
+			console.log(`[${url}][${elapsed.toFixed(1)}s] ${message}`);
+
+			// Handle slow mode responses
+			if (useSlowEndpoint && waitingForSlowResponse) {
+				if (message.startsWith('SLOW_COMPLETE') || message.startsWith('SLOW_INTERRUPTED')) {
+					waitingForSlowResponse = false;
+					console.log('Slow operation completed. Waiting 3 seconds before sending next slow request...');
+
+					setTimeout(() => {
+						if (ws.readyState === WebSocket.OPEN) {
+							console.log('Sending another slow request via WebSocket...');
+							waitingForSlowResponse = true;
+							ws.send(`SLOW_PING at ${new Date().toISOString()}`);
+						}
+					}, 3000);
+				}
+			}
 		});
 
 		ws.on('close', (code, reason) => {
@@ -63,7 +83,17 @@ function connectToApp(ws, url) {
 }
 
 async function main() {
-	const url = `ws://127.0.0.1:8080`;
+	const haproxyIngressNodePort = execSync(
+		"kubectl get svc -n haproxy-controller \
+		haproxy-ingress-kubernetes-ingress -o jsonpath='{.spec.ports[0].nodePort}'"
+	)
+
+	const ingressHost = execSync(
+		"kubectl get ingress \
+			-o jsonpath='{.items[0].spec.rules[0].host}'"
+	)
+
+	const url = `ws://${ingressHost}:${haproxyIngressNodePort}`;
 	const ws = new WebSocket(url);
 
 	try {
