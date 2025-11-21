@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -39,7 +40,25 @@ func main() {
 		slog.Info("HTTP request handled", "method", r.Method, "path", r.URL.Path)
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
+		response := map[string]any{
+			"status":    "healthy",
+			"timestamp": time.Now().Unix(),
+		}
+
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			slog.Error("Failed to encode health response", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 	})
 
 	server := new(http.Server)
