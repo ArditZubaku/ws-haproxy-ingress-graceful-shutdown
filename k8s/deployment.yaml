@@ -20,9 +20,22 @@ spec:
           imagePullPolicy: Never # Use local image
           ports:
             - containerPort: 8080
-          # readinessProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: 8080
-          #   initialDelaySeconds: 3
-          #   periodSeconds: 5
+          # ---- HEALTH PROBES ----
+          # detects when the app is ready before HAProxy sends traffic
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 1
+            failureThreshold: 3
+          # restarts the pod if the process freezes
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
