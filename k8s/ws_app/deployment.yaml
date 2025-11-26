@@ -20,6 +20,7 @@ spec:
           imagePullPolicy: Never # Use local image
           ports:
             - containerPort: 8080
+            - containerPort: 9999 # Service communication port
           # ---- HEALTH PROBES ----
           # detects when the app is ready before HAProxy sends traffic
           readinessProbe:
