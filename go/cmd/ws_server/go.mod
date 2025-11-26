@@ -1,3 +1,4 @@
+// TODO: Rename me
 module github.com/ArditZubaku/go-node-ws
 
 go 1.24.3

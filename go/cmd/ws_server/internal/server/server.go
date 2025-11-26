@@ -60,7 +60,7 @@ func (s *Server) Start() {
 
 	go s.handleShutdown()
 
-	slog.Info("Server starting", "addr", s.http.Addr)
+	slog.Info("HTTP Server starting", "addr", s.http.Addr)
 
 	if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
 		slog.Error("Server error", "error", err)
