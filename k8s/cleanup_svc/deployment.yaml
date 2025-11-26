@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cleanup-svc
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cleanup-svc
+  template:
+    metadata:
+      labels:
+        app: cleanup-svc
+    spec:
+      containers:
+        - name: cleanup-svc
+          image: cleanup_svc:latest
+          imagePullPolicy: Never # Use local image
