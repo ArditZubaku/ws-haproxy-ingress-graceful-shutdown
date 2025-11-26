@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import WebSocket from 'ws';
 
 // Parse command line arguments
@@ -195,14 +196,21 @@ async function main() {
 	console.log(`Starting ${numClients} WebSocket client${numClients > 1 ? 's' : ''}...`);
 
 	try {
-		// Create array of connection promises for multiple clients
-		const connectionPromises = [];
-		for (let i = 1; i <= numClients; i++) {
-			connectionPromises.push(connectToApp(url, 0, 5, i));
-		}
+		// Connect clients one by one with a small delay between each
+		const delayBetweenConnections = 50; // 50ms delay between connections
 
-		// Wait for all clients to complete
-		await Promise.allSettled(connectionPromises);
+		for (let i = 1; i <= numClients; i++) {
+			try {
+				await connectToApp(url, 0, enableRetries ? 5 : 0, i);
+			} catch (error) {
+				console.log(`[Client ${i}] Failed to connect: ${error.message}`);
+			}
+
+			// Small delay before next connection (except for the last one)
+			if (i < numClients) {
+				await sleep(delayBetweenConnections)
+			}
+		}
 	} catch (error) {
 		console.error('Error during WebSocket connection:', error);
 		process.exit(1);
