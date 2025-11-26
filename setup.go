@@ -128,7 +128,11 @@ func main() {
 	println("Setup completed successfully.")
 
 	println("Spinning up 100 Node.js WS clients")
-	go execCmd("node nodejs/ws.mjs -n 100 > ws-clients.log 2>&1")
+	c := make(chan struct{}, 1)
+	go func() {
+		execCmd("node nodejs/ws.mjs -n 100 > ws-clients.log 2>&1")
+		close(c)
+	}()
 
 	time.Sleep(10 * time.Second)
 	execCmd("docker build -t cleanup_svc ./go/cmd/cleanup_svc")
@@ -138,7 +142,8 @@ func main() {
 	println("Going to run cleanup_svc")
 	execCmd("kubectl apply -f k8s/cleanup_svc/deployment.yaml")
 
-	select {} // Keep the main goroutine alive
+	<-c
+	println("Check ws-clients.log for detailed client connection logs.")
 }
 
 func execCmd(cmd string) {
@@ -146,7 +151,10 @@ func execCmd(cmd string) {
 
 	// Use shell for complex commands with pipes, quotes, etc.
 	var execCmd *exec.Cmd
-	if strings.Contains(cmd, "|") || strings.Contains(cmd, "$(") || strings.Contains(cmd, "'") {
+	if strings.Contains(cmd, "|") ||
+		strings.Contains(cmd, "$(") ||
+		strings.Contains(cmd, "node") ||
+		strings.Contains(cmd, "'") {
 		execCmd = exec.Command("bash", "-c", cmd)
 	} else {
 		parts := strings.Fields(cmd)
