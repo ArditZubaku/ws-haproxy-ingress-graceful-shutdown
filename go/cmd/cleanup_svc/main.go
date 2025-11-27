@@ -9,33 +9,27 @@ import (
 )
 
 func main() {
-	const serviceEndpoint = "ws-app:9999"
+	const wsServer = "ws-app:9999"
 
-	conn, err := net.Dial("tcp", serviceEndpoint)
+	preStopConn, preStopErr := net.Listen("tcp", ":55000")
+	if preStopErr != nil {
+		panic(preStopErr)
+	}
+	defer preStopConn.Close()
+
+	slog.Info("Pre-stop TCP listener started on", "addr", preStopConn.Addr().String())
+
+	// Once we receive a connection, we know preStop reached us and we can start
+	preStopConn.Accept()
+	slog.Info("Pre-stop hook triggered, connecting to service...")
+
+	conn, err := net.Dial("tcp", wsServer)
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
 	slog.Info("Connected to service at ", "addr", conn.RemoteAddr().String())
-
-	for {
-		buf := make([]byte, 1)
-		n, err := conn.Read(buf)
-		if err != nil {
-			slog.Error("Failed to read from service", "error", err)
-			return
-		}
-
-		slog.Info(
-			"Received message from server - that means 100 clients have been connected",
-			"message", string(buf[:n]),
-		)
-
-		if n > 0 {
-			break
-		}
-	}
 
 	scanner := bufio.NewScanner(conn)
 	for {
