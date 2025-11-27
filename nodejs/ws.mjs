@@ -196,21 +196,39 @@ async function main() {
 	console.log(`Starting ${numClients} WebSocket client${numClients > 1 ? 's' : ''}...`);
 
 	try {
-		// Connect clients one by one with a small delay between each
+		// Connect clients one by one with a delay between each connection attempt
+		const connectionPromises = [];
 		const delayBetweenConnections = 50; // 50ms delay between connections
 
-		for (let i = 1; i <= numClients; i++) {
-			try {
-				await connectToApp(url, 0, enableRetries ? 5 : 0, i);
-			} catch (error) {
-				console.log(`[Client ${i}] Failed to connect: ${error.message}`);
-			}
+		console.log(`Connecting ${numClients} clients one by one...`);
 
-			// Small delay before next connection (except for the last one)
+		for (let i = 1; i <= numClients; i++) {
+			// Start the connection (don't await it yet)
+			const promise = connectToApp(url, 0, enableRetries ? 5 : 0, i)
+				.catch(error => {
+					console.log(`[Client ${i}] Failed to connect: ${error.message}`);
+					return { error: error.message };
+				});
+
+			connectionPromises.push(promise);
+
+			// Wait before starting the next connection (except for the last one)
 			if (i < numClients) {
-				await sleep(delayBetweenConnections)
+				await sleep(delayBetweenConnections);
 			}
 		}
+
+		// Now wait for all connections to complete their lifecycle
+		const results = await Promise.allSettled(connectionPromises);
+
+		// Count successful vs failed connections
+		const successful = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
+		const failed = results.filter(r => r.status === 'rejected' || r.value?.error).length;
+
+		console.log(`\n=== CONNECTION SUMMARY ===`);
+		console.log(`Total clients attempted: ${numClients}`);
+		console.log(`Successfully processed: ${successful}`);
+		console.log(`Failed to process: ${failed}`);
 	} catch (error) {
 		console.error('Error during WebSocket connection:', error);
 		process.exit(1);
