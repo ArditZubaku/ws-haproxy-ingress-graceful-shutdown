@@ -48,27 +48,43 @@ func main() {
 		"--set controller.image.tag=3.1.14")
 	println("HAProxy-Controller pods: \n", execCmdGetOutput("kubectl get pods -n haproxy-controller"))
 
+	type Exec struct {
+		Command []string `json:"command,omitzero"`
+	}
+	type PreStop struct {
+		Exec Exec `json:"exec,omitzero"`
+	}
+	type Lifecycle struct {
+		PreStop PreStop `json:"preStop,omitzero"`
+	}
+	type Container struct {
+		Name      string    `json:"name,omitempty"`
+		Lifecycle Lifecycle `json:"lifecycle,omitzero"`
+	}
 	type Patch struct {
 		Spec struct {
 			Template struct {
 				Spec struct {
-					TerminationGracePeriodSeconds int `json:"terminationGracePeriodSeconds,omitempty"`
-					Containers                    []struct {
-						Name      string `json:"name,omitempty"`
-						Lifecycle struct {
-							PreStop struct {
-								Exec struct {
-									Command []string `json:"command,omitzero"`
-								} `json:"exec,omitzero"`
-							} `json:"preStop,omitzero"`
-						} `json:"lifecycle,omitzero"`
-					} `json:"containers,omitzero"`
+					TerminationGracePeriodSeconds int         `json:"terminationGracePeriodSeconds,omitempty"`
+					Containers                    []Container `json:"containers,omitzero"`
 				} `json:"spec,omitzero"`
 			} `json:"template,omitzero"`
 		} `json:"spec,omitzero"`
 	}
 	patchStruct := new(Patch)
 	patchStruct.Spec.Template.Spec.TerminationGracePeriodSeconds = 901
+	patchStruct.Spec.Template.Spec.Containers = []Container{
+		{
+			Name: "kubernetes-ingress-controller",
+			Lifecycle: Lifecycle{
+				PreStop: PreStop{
+					Exec: Exec{
+						Command: []string{"/bin/sh", "-c", "kill -USR1 $(pidof haproxy) && nc cleanup-svc 55000 && sleep 900"},
+					},
+				},
+			},
+		},
+	}
 	patchBytes, err := json.Marshal(patchStruct)
 	fmt.Println("Generated patch JSON:", string(patchBytes))
 	panicIfErr(err)
@@ -130,7 +146,7 @@ func main() {
 	println("Spinning up 100 Node.js WS clients")
 	c := make(chan struct{}, 1)
 	go func() {
-		execCmd("node nodejs/ws.mjs -n 100 > ws-clients.log 2>&1")
+		execCmd("node nodejs/ws.mjs -s -n 100 > ws-clients.log 2>&1")
 		close(c)
 	}()
 
@@ -141,6 +157,7 @@ func main() {
 	println("Image found in minikube: \n", execCmdGetOutput("minikube image ls | grep cleanup_svc"))
 	println("Going to run cleanup_svc")
 	execCmd("kubectl apply -f k8s/cleanup_svc/deployment.yaml")
+	execCmd("kubectl apply -f k8s/cleanup_svc/service.yaml")
 
 	<-c
 	println("Check ws-clients.log for detailed client connection logs.")
