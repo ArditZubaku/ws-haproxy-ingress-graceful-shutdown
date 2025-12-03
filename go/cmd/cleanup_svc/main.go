@@ -6,13 +6,17 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 )
 
 func main() {
 	const wsServer = "ws-app:9999"
+
 	continueCh := make(chan struct{})
-	go listenForPreStop(continueCh)
+	closeOnce := new(sync.Once)
+
+	go listenForPreStop(continueCh, closeOnce)
 
 	<-continueCh
 	slog.Info("Pre-stop signal received, starting cleanup...")
@@ -44,7 +48,7 @@ func performCleanupTask(wsServer string) {
 	}
 }
 
-func listenForPreStop(continueCh chan<- struct{}) {
+func listenForPreStop(continueCh chan<- struct{}, closeOnce *sync.Once) {
 	ln, err := net.Listen("tcp", ":55000")
 	if err != nil {
 		panic(err)
@@ -66,11 +70,16 @@ func listenForPreStop(continueCh chan<- struct{}) {
 			slog.String("addr", conn.RemoteAddr().String()),
 		)
 
-		go handleConnection(conn, sBuf, continueCh)
+		go handleConnection(conn, sBuf, continueCh, closeOnce)
 	}
 }
 
-func handleConnection(conn net.Conn, sBuf []byte, continueCh chan<- struct{}) {
+func handleConnection(
+	conn net.Conn,
+	sBuf []byte,
+	continueCh chan<- struct{},
+	closeOnce *sync.Once,
+) {
 	defer closeOrLog(conn, "TCP connection")
 
 	// Listen for messages constantly until we receive "preStop-trigger"
@@ -93,7 +102,10 @@ func handleConnection(conn net.Conn, sBuf []byte, continueCh chan<- struct{}) {
 
 		if message == "preStop-trigger\n" { // Because echo adds newline
 			slog.Info("Stop message received, triggering shutdown")
-			close(continueCh)
+			closeOnce.Do(func() {
+				close(continueCh)
+				slog.Info("Channel closed, cleanup will start")
+			})
 			return
 		}
 	}
