@@ -91,13 +91,31 @@ func main() {
 
 	// Wait for HAProxy pods to be ready
 	println("Waiting for HAProxy to be ready...")
-	execCmd("kubectl wait " +
-		"--for=condition=ready " +
-		"--timeout=60s " +
-		"pod " +
-		"-l app.kubernetes.io/name=kubernetes-ingress " +
-		"-n haproxy-controller",
+
+	// Get the current running pod names and wait for them specifically
+	haproxyPodNames := strings.TrimSpace(
+		execCmdGetOutput(
+			"kubectl get pods " +
+				"-n haproxy-controller " +
+				"-l app.kubernetes.io/name=kubernetes-ingress " +
+				"--field-selector=status.phase=Running " +
+				"-o jsonpath='{.items[*].metadata.name}'",
+		),
 	)
+	println("HAPROXY pod names: ", haproxyPodNames)
+
+	if haproxyPodNames != "" {
+		for podName := range strings.FieldsSeq(haproxyPodNames) {
+			execCmd(
+				fmt.Sprintf(
+					"kubectl wait --for=condition=ready --timeout=60s pod/%s -n haproxy-controller",
+					podName,
+				),
+			)
+		}
+	} else {
+		println("No running HAProxy pods found, skipping wait...")
+	}
 
 	// Try the curl using the dynamic ingress host
 	wsServerURL := fmt.Sprintf("http://%s:%s", ingressHost, nodePort)
