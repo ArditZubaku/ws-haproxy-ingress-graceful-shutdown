@@ -48,46 +48,9 @@ func main() {
 		"--set controller.image.tag=3.1.14")
 	println("HAProxy-Controller pods: \n", execCmdGetOutput("kubectl get pods -n haproxy-controller"))
 
-	type Exec struct {
-		Command []string `json:"command,omitzero"`
-	}
-	type PreStop struct {
-		Exec Exec `json:"exec,omitzero"`
-	}
-	type Lifecycle struct {
-		PreStop PreStop `json:"preStop,omitzero"`
-	}
-	type Container struct {
-		Name      string    `json:"name,omitempty"`
-		Lifecycle Lifecycle `json:"lifecycle,omitzero"`
-	}
-	type Patch struct {
-		Spec struct {
-			Template struct {
-				Spec struct {
-					TerminationGracePeriodSeconds int         `json:"terminationGracePeriodSeconds,omitempty"`
-					Containers                    []Container `json:"containers,omitzero"`
-				} `json:"spec,omitzero"`
-			} `json:"template,omitzero"`
-		} `json:"spec,omitzero"`
-	}
-	patchStruct := new(Patch)
-	patchStruct.Spec.Template.Spec.TerminationGracePeriodSeconds = 901
-	patchStruct.Spec.Template.Spec.Containers = []Container{
-		{
-			Name: "kubernetes-ingress-controller",
-			Lifecycle: Lifecycle{
-				PreStop: PreStop{
-					Exec: Exec{
-						Command: []string{"/bin/sh", "-c", "kill -USR1 $(pidof haproxy) && nc cleanup-svc 55000 && sleep 900"},
-					},
-				},
-			},
-		},
-	}
-	patchBytes, err := json.Marshal(patchStruct)
-	fmt.Println("Generated patch JSON:", string(patchBytes))
+	patchBytes, err := json.Marshal(makePatch())
 	panicIfErr(err)
+	fmt.Println("Generated patch JSON:", string(patchBytes))
 
 	patchCmd := fmt.Sprintf(
 		"kubectl patch deployment haproxy-ingress-kubernetes-ingress -n haproxy-controller -p='%s'",
@@ -161,6 +124,81 @@ func main() {
 
 	<-c
 	println("Check ws-clients.log for detailed client connection logs.")
+}
+
+type Exec struct {
+	Command []string `json:"command,omitempty"`
+}
+
+type PreStop struct {
+	Exec *Exec `json:"exec,omitempty"`
+}
+
+type PostStart struct {
+	Exec *Exec `json:"exec,omitempty"`
+}
+
+type Lifecycle struct {
+	PreStop   *PreStop   `json:"preStop,omitempty"`
+	PostStart *PostStart `json:"postStart,omitempty"`
+}
+
+type Container struct {
+	Name      string     `json:"name"`
+	Lifecycle *Lifecycle `json:"lifecycle,omitempty"`
+}
+
+type Patch struct {
+	Spec struct {
+		Template struct {
+			Spec struct {
+				TerminationGracePeriodSeconds int         `json:"terminationGracePeriodSeconds,omitempty"`
+				Containers                    []Container `json:"containers,omitzero"`
+			} `json:"spec,omitzero"`
+		} `json:"template,omitzero"`
+	} `json:"spec,omitzero"`
+}
+
+func makePatch() *Patch {
+	patchStruct := new(Patch)
+	patchStruct.Spec.Template.Spec.TerminationGracePeriodSeconds = 901
+	patchStruct.Spec.Template.Spec.Containers = []Container{
+		{
+			Name: "kubernetes-ingress-controller",
+			Lifecycle: &Lifecycle{
+				PreStop: &PreStop{
+					Exec: &Exec{
+						// Send preStop trigger with logging for debugging
+						Command: []string{
+							"/bin/sh",
+							"-c",
+							"DURATION=200 && " +
+								"echo \"PreStop hook starting...\" >> /tmp/preStop.log && " +
+								"kill -USR1 $(pidof haproxy) && " +
+								"echo \"HAProxy USR1 sent, now triggering cleanup...\" >> /tmp/preStop.log && " +
+								"echo \"preStop-trigger\" | /usr/bin/nc cleanup-svc.default.svc.cluster.local 55000 && " +
+								"echo \"Cleanup trigger sent, sleeping...\" >> /tmp/preStop.log && " +
+								"for i in $(seq 1 $DURATION); do echo \"Sleep $i/$DURATION\" >> /tmp/preStop.log; sleep 1; done && " +
+								"rm /tmp/preStop.log",
+						},
+					},
+				},
+				PostStart: &PostStart{
+					Exec: &Exec{
+						Command: []string{
+							"/bin/sh",
+							"-c",
+							"echo \"PostStart hook executed\" > /tmp/poststart.log && " +
+								"which nc >> /tmp/which.log 2>&1 || true",
+						},
+						// Command: []string{"/bin/sh", "-c", "echo 'I am starting' > /proc/1/fd/1"},
+					},
+				},
+			},
+		},
+	}
+
+	return patchStruct
 }
 
 func execCmd(cmd string) {
