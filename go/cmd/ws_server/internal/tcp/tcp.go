@@ -11,7 +11,7 @@ import (
 	"github.com/ArditZubaku/go-node-ws/internal/connmanager"
 )
 
-func HandleServiceCommunication(cm *connmanager.ConnectionManager) {
+func HandleCleanUpTask(cm *connmanager.ConnectionManager) {
 	ln, err := net.Listen("tcp", ":9999")
 	if err != nil {
 		slog.Error("Failed to listen on TCP port", "error", err)
@@ -24,17 +24,14 @@ func HandleServiceCommunication(cm *connmanager.ConnectionManager) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			slog.Error("Failed to accept IPC connection", "error", err)
+			slog.Error("Failed to accept TCP connection", "error", err)
 			continue
 		}
 		go handleServiceConnection(conn, cm)
 	}
 }
 
-func handleServiceConnection(
-	conn net.Conn,
-	cm *connmanager.ConnectionManager,
-) {
+func handleServiceConnection(conn net.Conn, cm *connmanager.ConnectionManager) {
 	defer conn.Close()
 
 	reader := bufio.NewScanner(conn)

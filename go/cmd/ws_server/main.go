@@ -11,6 +11,6 @@ import (
 func main() {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 	cm := connmanager.NewConnectionManager()
-	go tcp.HandleServiceCommunication(cm)
+	go tcp.HandleCleanUpTask(cm)
 	http.NewServer(cm).Start()
 }
