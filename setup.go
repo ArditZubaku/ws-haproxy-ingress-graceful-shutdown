@@ -34,9 +34,9 @@ func main() {
 	execCmd("helm repo add haproxytech https://haproxytech.github.io/helm-charts")
 	execCmd("helm repo update")
 	execCmd("docker pull haproxytech/kubernetes-ingress:3.1.14")
-	execCmd("docker save haproxytech/kubernetes-ingress:3.1.14 -o haproxy-ingress.tar")
-	execCmd("minikube image load haproxy-ingress.tar")
-	printIfErr(os.Remove("haproxy-ingress.tar"))
+	execCmd("docker save haproxytech/kubernetes-ingress:3.1.14 -o /tmp/haproxy-ingress.tar")
+	execCmd("minikube image load /tmp/haproxy-ingress.tar")
+	printIfErr(os.Remove("/tmp/haproxy-ingress.tar"))
 	println("Image found in minikube: \n", execCmdGetOutput("minikube image ls | grep haproxy"))
 	execCmd("helm install haproxy-ingress haproxytech/kubernetes-ingress " +
 		"--namespace haproxy-controller " +
@@ -50,7 +50,7 @@ func main() {
 
 	patchBytes, err := json.Marshal(makePatch())
 	panicIfErr(err)
-	fmt.Println("Generated patch JSON:", string(patchBytes))
+	println("Generated patch JSON:", string(patchBytes))
 
 	patchCmd := fmt.Sprintf(
 		"kubectl patch deployment haproxy-ingress-kubernetes-ingress -n haproxy-controller -p='%s'",
@@ -100,10 +100,10 @@ func main() {
 	)
 
 	// Try the curl using the dynamic ingress host
-	curlURL := fmt.Sprintf("http://%s:%s", ingressHost, nodePort)
-	println("Trying to curl:", curlURL)
+	wsServerURL := fmt.Sprintf("http://%s:%s", ingressHost, nodePort)
+	println("Trying to curl:", wsServerURL)
 	println("CURL RESULT:")
-	println(execCmdGetOutput(fmt.Sprintf("curl -v %s", curlURL)))
+	println(execCmdGetOutput(fmt.Sprintf("curl -v %s", wsServerURL)))
 	println("Setup completed successfully.")
 
 	println("Spinning up 100 Node.js WS clients")
@@ -122,8 +122,29 @@ func main() {
 	execCmd("kubectl apply -f k8s/cleanup_svc/deployment.yaml")
 	execCmd("kubectl apply -f k8s/cleanup_svc/service.yaml")
 
+	go monitorWsConnections(wsServerURL)
+
 	<-c
 	println("Check ws-clients.log for detailed client connection logs.")
+}
+
+func monitorWsConnections(url string) {
+	type wsConnectionsCount struct {
+		Count int `json:"connections_count"`
+	}
+	for range time.Tick(time.Second * 5) {
+		res := execCmdGetOutput(fmt.Sprintf("curl -v %s", url+"/connections-count"))
+		var count wsConnectionsCount
+		err := json.Unmarshal([]byte(res), &count)
+		if err != nil {
+			println("Error unmarshaling connections count:", err.Error())
+		} else {
+			println("Connections count:", count.Count)
+		}
+		if count.Count == 0 {
+			return
+		}
+	}
 }
 
 type Exec struct {
@@ -275,6 +296,6 @@ func panicIfErr(err error) {
 
 func printIfErr(err error) {
 	if err != nil {
-		fmt.Println("Error:", err)
+		println("Error:", err)
 	}
 }
