@@ -45,7 +45,7 @@ func handleServiceConnection(conn net.Conn, cm *connmanager.ConnectionManager) {
 		}
 		slog.Info("Received service message", "message", n)
 
-		cm.CloseNConnections(n)
+		cm.CloseFirstNConnections(n)
 
 		// No need for newline, fmt.Fprintln adds it
 		n, err = fmt.Fprintln(conn, "Closing "+msg+" WS connections")

@@ -5,6 +5,7 @@ package connmanager
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -13,14 +14,14 @@ import (
 
 // ConnectionManager tracks and manages WebSocket connections
 type ConnectionManager struct {
-	connections map[*websocket.Conn]bool
+	connections []*websocket.Conn
 	mu          sync.RWMutex
 	Shutdown    chan struct{}
 }
 
 func NewConnectionManager() *ConnectionManager {
 	return &ConnectionManager{
-		connections: make(map[*websocket.Conn]bool),
+		connections: make([]*websocket.Conn, 100),
 		Shutdown:    make(chan struct{}),
 	}
 }
@@ -28,31 +29,27 @@ func NewConnectionManager() *ConnectionManager {
 func (cm *ConnectionManager) AddConnection(conn *websocket.Conn) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	cm.connections[conn] = true
+	cm.connections = append(cm.connections, conn)
 	slog.Info("WebSocket connection added", "total", len(cm.connections))
 	if len(cm.connections) >= 100 {
 		slog.Info("Reached 100 WebSocket connections")
 	}
 }
 
-func (cm *ConnectionManager) RemoveConnection(conn *websocket.Conn) {
+func (cm *ConnectionManager) RemoveConnection(index int) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	delete(cm.connections, conn)
+	cm.connections = slices.Delete(cm.connections, index, index+1)
 	slog.Info("WebSocket connection removed", "total", len(cm.connections))
 }
 
-func (cm *ConnectionManager) GetNConnections(n int) []*websocket.Conn {
+func (cm *ConnectionManager) GetFirstNConnections(n int) []*websocket.Conn {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	connections := make([]*websocket.Conn, 0, n)
-	for conn := range cm.connections {
-		if len(connections) >= n {
-			break
-		}
-		connections = append(connections, conn)
-	}
+	connections := make([]*websocket.Conn, n)
+	copy(connections, cm.connections[:min(n, len(cm.connections))])
+
 	return connections
 }
 
@@ -63,12 +60,12 @@ func (cm *ConnectionManager) GetConnectionsCount() int {
 	return len(cm.connections)
 }
 
-func (cm *ConnectionManager) CloseNConnections(n int) {
-	connections := cm.GetNConnections(n)
+func (cm *ConnectionManager) CloseFirstNConnections(n int) {
+	connections := cm.GetFirstNConnections(n)
 
 	slog.Info("Closing WebSocket connections", "count", len(connections))
 
-	for _, conn := range connections {
+	for i, conn := range connections {
 		// Send close message
 		if err := conn.WriteMessage(
 			websocket.CloseMessage,
@@ -84,26 +81,22 @@ func (cm *ConnectionManager) CloseNConnections(n int) {
 			slog.Error("Error closing WebSocket connection", "error", err)
 		}
 
-		// Remove from map
-		cm.RemoveConnection(conn)
+		// Remove from array
+		cm.RemoveConnection(i)
 	}
 }
 
 func (cm *ConnectionManager) CloseAllConnections(ctx context.Context) {
 	cm.mu.RLock()
-	connections := make([]*websocket.Conn, 0, len(cm.connections))
-	for conn := range cm.connections {
-		connections = append(connections, conn)
-	}
-	cm.mu.RUnlock()
+	defer cm.mu.RUnlock()
 
-	slog.Info("Closing all WebSocket connections", "count", len(connections))
+	slog.Info("Closing all WebSocket connections", "count", len(cm.connections))
 
 	// Signal shutdown to all connections
 	close(cm.Shutdown)
 
 	// Close all connections gracefully
-	for _, conn := range connections {
+	for i, conn := range cm.connections {
 		// Send close message
 		if err := conn.WriteMessage(
 			websocket.CloseMessage,
@@ -118,6 +111,9 @@ func (cm *ConnectionManager) CloseAllConnections(ctx context.Context) {
 		if err := conn.Close(); err != nil {
 			slog.Error("Error closing WebSocket connection", "error", err)
 		}
+
+		// Remove from array
+		cm.RemoveConnection(i)
 	}
 
 	// Wait for all connections to be removed or timeout
